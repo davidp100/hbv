@@ -11,6 +11,9 @@ from sorcery import dict_of
 import utils
 import hbv
 
+# =============================================================================
+# Set/get some basic simulation info and model parameters
+
 # -----------------------------------------------------------------------------
 # Define timestep, simulation period, grid and fixed properties
 
@@ -29,6 +32,11 @@ flen = utils.read_asc(flen_path, return_metadata=False)
 # -----------------------------------------------------------------------------
 # Set parameters (initial and/or fixed values)
 
+# - These parameters could also be set as numpy arrays (i.e. to permit spatially
+# varying parameter values)
+# - Also possible to do things like use python optimisation routines to
+# calibrate parameters...
+
 icf = 2.0
 lpf = 0.9
 fc = 250.0
@@ -44,14 +52,22 @@ alpha = 0.7
 k1 = 0.01
 tau = 1.0 / 86400.0
 
-# -----------------------------------------------------------------------------
-# Climate input details and operations
+# =============================================================================
+# Example with climate inputs using a class
 
+# -----------------------------------------------------------------------------
+# Set up climate inputs class
+
+# - Making a simple class allows us to (1) calculate relevant constants and read
+# any key files (e.g. in __init__()) and (2) define a method to calculate (or 
+# read) climate inputs at each timestep in calc_fields()
+# - A class keeps all the important data and functionality together and gives
+# a lot of flexibility
 # - Example of creating spatial fields from one station time series using
 # lapse rates etc (just for testing)
-# - Making a simple class allows us to (1) calculate relevant constants (e.g.
-# in __init__() and (2) define a method to calculate (or read) climate inputs
-# at each timestep
+# - Could also adapt to read from a file(s) of arrays for each timestep (e.g. a
+# netcdf file) or to take a simulated spatial field from elsewhere (e.g. the
+# random mixing code)
 
 climate_input_path = 'Z:/DP/Work/HBV/Tests/climate_inputs.csv'
 
@@ -72,7 +88,7 @@ class Climate(object):
         """Read initial inputs and calculate helper constants/variables."""
         # Station time series
         self.df = pd.read_csv(
-            climate_input_path, index_col='datetime', dtype=np.float64, 
+            climate_input_path, index_col='datetime', dtype=np.float32, 
             parse_dates=True, dayfirst=True
         )
         
@@ -90,7 +106,11 @@ class Climate(object):
         self.orog_fac *= rfac
         
         # Temperature elevation adjustment array
-        self.tadj = (elev - zbase) * -0.0065
+        self.tadj = np.zeros((ny, nx), dtype=np.float32)
+        self.tadj[:] = (elev - zbase) * -0.0065
+        
+        # Melting/freezing threshold temperature
+        self.tm = 273.15
     
     def calc_fields(self, date):
         """Calculate spatial fields of climate inputs for timestep.
@@ -98,20 +118,19 @@ class Climate(object):
         Args:
             date (datetime): Date/time of required climate fields
         """
-        self.tas = self.df.loc[self.df.index == date, 'tas'].values[0] + self.tadj
-        self.pr = self.df.loc[self.df.index == date, 'pr'].values[0] * self.orog_fac
-        self.rf = np.where(self.tas > 273.15, self.pr, 0.0)
+        self.tas = self.tadj + np.float32(self.df.loc[self.df.index == date, 'tas'].values[0])
+        self.pr = self.orog_fac * np.float32(self.df.loc[self.df.index == date, 'pr'].values[0])
+        self.rf = np.where(self.tas > self.tm, self.pr, 0.0)
         self.sf = self.pr - self.rf
         # Very crude approximation of PET for testing
-        self.pet = self.tas * 0.0
         self.pet = np.where(
-            ((self.tas - 273.15) >= -20.0) & ((self.tas - 273.15) < -2.0),
-            (self.tas - 273.15) * 0.01 + 0.22,
-            self.pet
+            ((self.tas - self.tm) >= -20.0) & ((self.tas - self.tm) < -2.0),
+            (self.tas - self.tm) * 0.01 + 0.22,
+            0.0
         )
         self.pet = np.where(
-            (self.tas - 273.15) >= -2.0,
-            (self.tas - 273.15) * 0.3 + 0.8,
+            (self.tas - self.tm) >= -2.0,
+            (self.tas - self.tm) * 0.3 + 0.8,
             self.pet
         )
 
@@ -121,6 +140,8 @@ class Climate(object):
 # - This is a class that inherits from hbv.BaseModel, where a couple of methods
 # are overridden to allow us to pass climate inputs to the model at each
 # timestep (see Climate class above)
+# - If we define some conventions we might be able to skip this part in future,
+# but it is needed in the initial version of the code
 
 class Model(hbv.BaseModel):
     
@@ -150,13 +171,14 @@ setup_dict = dict_of(
 m = Model(**setup_dict)
 m.run_model()
 
-output_path = 'Z:/DP/Work/HBV/Tests/out8.csv'
+output_path = 'Z:/DP/Work/HBV/Tests/out_z.csv'
 m.df_cat.to_csv(output_path)
 
-# -----------------------------------------------------------------------------
-# Misc.
+# =============================================================================
+# Miscellaneous
 
-# - Examples of parameter bounds
+# -----------------------------------------------------------------------------
+# Examples of parameter bounds
 
 # https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2015WR018247
 # https://www.tandfonline.com/doi/full/10.1080/02626667.2018.1466056
