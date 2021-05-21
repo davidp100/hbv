@@ -25,6 +25,7 @@ class BaseModel(object):
         mask (ndarray): Array marking inside (1) and outside (0) catchment
         elev (ndarray): Cell elevations [m]
         flen (ndarray): Cell distances to (main) outlet [m]
+        cat_ncells (float): Number of cells in catchment
         sim_dates (list of datetime): Date/time at each timestep of simulation
         date (datetime): Date/time of current timestep
         
@@ -47,6 +48,7 @@ class BaseModel(object):
         
         lp (float): Soil moisture limit for aet=pet [mm]
         rlag (ndarray): Time lag [timestep(s)]
+        
         rlag_l (ndarray): Integer lower bound for time lag [timestep(s)]
         rlag_u (ndarray): Integer upper bound for time lag [timestep(s)]
         rlag_lf (ndarray): Fraction of runoff to assign to lower bound time
@@ -55,6 +57,8 @@ class BaseModel(object):
             lag [-]
         rlag_l_unq (ndarray): Unique lower bound lags [timestep]
         rlag_u_unq (ndarray): Unique upper bound lags [timestep]
+        roff_mask_l (dict of ndarray): Masks for lower bounds lags
+        roff_mask_u (dict of ndarray): Masks for upper bounds lags
         
         out_vars (list of str): Output variable names
         df_cat (pandas.DataFrame): Catchment output time series
@@ -80,6 +84,8 @@ class BaseModel(object):
             interception) [mm timestep-1]
         
         dc_roff (dict): Runoff at catchment outlet by date [mm timestep-1]
+        s0 (ndarray): Storage at beginning of timestep
+        s1 (ndarray): Storage at end of timestep
         ds (ndarray): Storage change for timestep [mm]
         
         aet (ndarray): Actual evapotranspiration [mm timestep-1]
@@ -124,6 +130,8 @@ class BaseModel(object):
         self.elev = kwargs['elev']
         self.mask = kwargs['mask']
         self.flen = kwargs['flen']
+        
+        self.cat_ncells = np.float32(np.sum(self.mask))
         
         self.sim_dates = []
         d = self.start_date
@@ -179,21 +187,23 @@ class BaseModel(object):
         self.lp = self.fc * self.lpf
         self.rlag = (np.max(self.flen) - self.flen) * self.tau
         self.rlag[self.mask == 0] = 0.0
-        self.rlag_l = np.floor(self.rlag).astype(np.int)
-        self.rlag_u = np.ceil(self.rlag).astype(np.int)
-        self.rlag_lf = 1.0 - (self.rlag - self.rlag_l.astype(np.float))
-        self.rlag_uf = self.rlag - self.rlag_l.astype(np.float)
-        self.rlag_l_unq = np.unique(self.rlag_l)
-        self.rlag_u_unq = np.unique(self.rlag_u)
     
     def init_outputs(self, **kwargs):
         """Initialise variables controlling and recording simulation outputs.
+        
+        Precipitation, ET and runoff will be added to the list if not present.
         
         Keyword Args:
             out_vars (list of str): Output variable names
         """
         if 'out_vars' in kwargs.keys():
             out_vars = kwargs['out_vars']
+            if 'pr' not in out_vars:
+                out_vars.append('pr')
+            if 'aet' not in out_vars:
+                out_vars.append('aet')
+            if 'roff' not in out_vars:
+                out_vars.append('roff')
         else:
             out_vars = [
                 'pr', 'aet', 'melt', 'roff', 'swe', 'sm', 'uz', 'lz', 'incps', 
@@ -240,8 +250,27 @@ class BaseModel(object):
     
     def init_helper_vars(self):
         """Initialise helper variables."""
+        # Runoff helper variables
         self.dc_roff = {}  # outflow_date: runoff
+        self.rlag_l = np.floor(self.rlag).astype(np.int)
+        self.rlag_u = np.ceil(self.rlag).astype(np.int)
+        self.rlag_lf = 1.0 - (self.rlag - self.rlag_l.astype(np.float32))
+        self.rlag_uf = self.rlag - self.rlag_l.astype(np.float32)
+        self.rlag_l_unq = np.unique(self.rlag_l)
+        self.rlag_u_unq = np.unique(self.rlag_u)
+        self.roff_mask_l = {}
+        self.roff_mask_u = {}
+        for lag in self.rlag_l_unq:
+            lag = int(lag)
+            self.roff_mask_l[lag] = np.logical_and(self.mask == 1, self.rlag_l == lag)
+        for lag in self.rlag_u_unq:
+            lag = int(lag)
+            self.roff_mask_u[lag] = np.logical_and(self.mask == 1, self.rlag_u == lag)
+        
+        # Storage and mass balance check helper variables
         self.ds = np.zeros((self.ny, self.nx), dtype=np.float32)
+        self.s0 = np.zeros((self.ny, self.nx), dtype=np.float32)
+        self.s1 = np.zeros((self.ny, self.nx), dtype=np.float32)
     
     def init_climate_obj(self):
         """Initialise user-defined climate input object (optional).
@@ -258,7 +287,9 @@ class BaseModel(object):
     def run_model(self):
         """Simulate all timesteps."""
         while self.date <= self.end_date:
-            self.ds.fill(0.0)
+            self.s0 = (
+                self.incps + self.snws + self.snwl + self.sm + self.uz + self.lz
+            )
             self.simulate_timestep()
             self.date += datetime.timedelta(seconds=self.dt)
     
@@ -280,8 +311,6 @@ class BaseModel(object):
         self.simulate_soil_moisture()
         self.simulate_runoff()
         self.simulate_routing()
-        
-        self.check_mb()
         
         self.get_outputs()
     
@@ -305,7 +334,6 @@ class BaseModel(object):
         Use snowfall fraction to partition between snowfall and rainfall.
         """
         if np.max(self.pr) > 0.0:
-            self.ds -= self.incps
             sf_frac = self.sf / self.pr
             sf_frac = np.minimum(sf_frac, 1.0)
             sf_frac = np.maximum(sf_frac, 0.0)
@@ -314,12 +342,9 @@ class BaseModel(object):
             self.pr_sc -= incp
             self.sf_sc -= (incp * sf_frac)
             self.rf_sc = self.pr_sc - self.sf_sc
-            self.ds += self.incps
     
     def simulate_evapotranspiration(self):
         """Calculate actual evapotranspiration."""
-        self.ds -= (self.incps + self.sm)
-        
         # Interception evapotranspiration
         incp_et = np.minimum(self.incps, self.pet)
         self.incps -= incp_et
@@ -334,8 +359,6 @@ class BaseModel(object):
         self.sm -= soil_aet
         
         self.aet = incp_et + soil_aet
-        
-        self.ds += (self.incps + self.sm)
     
     def simulate_snowpack(self):
         """Simulate snowpack accumulation, melt and refreezing.
@@ -343,8 +366,6 @@ class BaseModel(object):
         Rainfall entering the soil moisture component is added to snow melt 
         here too.
         """
-        self.ds -= self.swe
-        
         # Potential melt and refreezing (i.e. if unlimited snowpack)
         self.melt = np.where(
             self.tas > self.ttm,
@@ -369,8 +390,6 @@ class BaseModel(object):
         self.snwl -= self.sm_in
         
         self.swe = self.snws + self.snwl
-        
-        self.ds += self.swe
     
     def simulate_soil_moisture(self):
         """Simulate soil moisture.
@@ -380,9 +399,7 @@ class BaseModel(object):
         with seepage through the soil. An adjustment is applied that ensures 
         soil moisture is filled to capacity before direct runoff occurs.
         """
-        self.ds -= self.sm
-        
-        # First estimate of direct runof
+        # First estimate of direct runoff
         dir_roff = np.maximum(self.sm + self.sm_in - self.fc, 0.0)
         self.sm += self.sm_in
         self.sm -= dir_roff
@@ -397,8 +414,6 @@ class BaseModel(object):
         dir_roff -= sm_fill
         self.sm += sm_fill
         self.uz_in = dir_roff + seep
-        
-        self.ds += self.sm
     
     def simulate_runoff(self):
         """Simulate runoff generation.
@@ -408,8 +423,6 @@ class BaseModel(object):
         Upper zone outflow calculated using HBV-96 approach (rather than more
         complicated additional option in wflow_hbv). 
         """
-        self.ds -= (self.sm + self.uz + self.lz)
-        
         # Percolation to lower zone
         self.uz += self.uz_in
         perc = np.minimum(self.perc, self.uz - (self.uz_in / 2.0)) #! /2.0 
@@ -441,8 +454,6 @@ class BaseModel(object):
         
         # Unrouted runoff
         self.roff_nr = uz_out + lz_out
-        
-        self.ds += (self.sm + self.uz + self.lz)
     
     def simulate_routing(self):
         """Simulate runoff routing.
@@ -466,69 +477,79 @@ class BaseModel(object):
             lag = int(lag)
             roff_date = self.date + datetime.timedelta(seconds=(lag * self.dt))
             
-            roff_mask = np.logical_and(self.mask == 1, self.rlag_l == lag)
-            roff_pl = np.sum(roff_l[roff_mask == 1]) / np.sum(self.mask)
+            roff_pl = np.sum(roff_l[self.roff_mask_l[lag] == 1]) / self.cat_ncells
             
             if roff_date not in self.dc_roff.keys():
                 self.dc_roff[roff_date] = roff_pl
             else:
                 self.dc_roff[roff_date] += roff_pl
-            
-            self.ds[roff_mask == 1] += roff_l[roff_mask == 1]
         
         # Upper bound lag
         for lag in self.rlag_u_unq:
             lag = int(lag)
             roff_date = self.date + datetime.timedelta(seconds=(lag * self.dt))
             
-            roff_mask = np.logical_and(self.mask == 1, self.rlag_u == lag)
-            roff_pu = np.sum(roff_u[roff_mask == 1]) / np.sum(self.mask)
+            roff_pu = np.sum(roff_u[self.roff_mask_u[lag] == 1]) / self.cat_ncells
             
             if roff_date not in self.dc_roff.keys():
                 self.dc_roff[roff_date] = roff_pu
             else:
                 self.dc_roff[roff_date] += roff_pu
-            
-            self.ds[roff_mask == 1] += roff_u[roff_mask == 1]
     
-    def check_mb(self):
+    def check_mb(self, pr, aet, roff):
         """Check catchment mass balance.
         
         Note that catchment runoff needs to be subtracted from self.ds, because
-        in self.simulate_routing() runoff is added to self.ds (i.e. effectively
-        routing/channel storage) but it is not removed there when outflow occurs.
+        unrouted runoff is added to storage at end of time step (i.e. self.s1)
+        as routing/channel storage effectively, but it is not removed there 
+        when outflow occurs.
         """
+        self.s1 = (
+                self.incps + self.snws + self.snwl + self.sm + self.uz + self.lz
+                + self.roff_nr
+            )
+        self.ds = self.s1 - self.s0
+        ds_cat = utils.spatial_mean(self.ds, self.mask) - roff
+        self.mb = pr - aet - roff - ds_cat
+        return(ds_cat)
+    
+    def get_outputs(self):
+        """Calculate and store catchment outputs in dataframe.
+        
+        Mass balance check is called here to avoid duplicate calculations of
+        spatial means.
+        """
+        out_vals = []
+        
         pr = utils.spatial_mean(self.pr, self.mask)
         aet = utils.spatial_mean(self.aet, self.mask)
         roff = self.dc_roff[self.date]
-        ds = utils.spatial_mean(self.ds, self.mask) - roff
-        self.mb = pr - aet - roff - ds
-    
-    def get_outputs(self):
-        """Calculate and store catchment outputs in dataframe."""
-        out_vals = []
+        
+        ds_cat = self.check_mb(pr, aet, roff)
+        
         for var in self.out_vars:
-            if var == 'roff':
-                out_vals.append(self.dc_roff[self.date])
+            if var == 'pr':
+                out_vals.append(pr)
+            elif var == 'aet':
+                out_vals.append(aet)
+            elif var == 'roff':
+                out_vals.append(roff)
+            elif var == 'ds':
+                out_vals.append(ds_cat)
             elif var == 'sca':
                 #! Hardcoded threshold (assuming swe in mm)
                 sca = (
                     np.sum(self.mask[np.logical_and(self.mask==1, self.swe>0.1)])
-                    / np.sum(self.mask[self.mask==1])
+                    / self.cat_ncells
                 )
                 out_vals.append(sca)
             elif var == 'mb':
                 out_vals.append(self.mb)
-            elif var == 'ds':
-                ds = utils.spatial_mean(self.ds, self.mask) - self.dc_roff[self.date]
-                out_vals.append(ds)
             else:
                 out_vals.append(utils.spatial_mean(getattr(self, var), self.mask))
         idx = self.sim_dates.index(self.date)
         self.df_cat.iloc[idx] = out_vals
-        
-    
-    
+
 
 
 
