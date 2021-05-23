@@ -49,16 +49,8 @@ class BaseModel(object):
         lp (float): Soil moisture limit for aet=pet [mm]
         rlag (ndarray): Time lag [timestep(s)]
         
-        rlag_l (ndarray): Integer lower bound for time lag [timestep(s)]
-        rlag_u (ndarray): Integer upper bound for time lag [timestep(s)]
-        rlag_lf (ndarray): Fraction of runoff to assign to lower bound time
-            lag [-]
-        rlag_uf (ndarray): Fraction of runoff to assign to upper bound time
-            lag [-]
-        rlag_l_unq (ndarray): Unique lower bound lags [timestep]
-        rlag_u_unq (ndarray): Unique upper bound lags [timestep]
-        roff_mask_l (dict of ndarray): Masks for lower bounds lags
-        roff_mask_u (dict of ndarray): Masks for upper bounds lags
+        nlags (int): Total number of lags (from 0 to maximum lag)
+        rlag_3d (ndarray): 3D array for fractional lags at each time lag [timestep(s)]
         
         out_vars (list of str): Output variable names
         df_cat (pandas.DataFrame): Catchment output time series
@@ -252,20 +244,24 @@ class BaseModel(object):
         """Initialise helper variables."""
         # Runoff helper variables
         self.dc_roff = {}  # outflow_date: runoff
-        self.rlag_l = np.floor(self.rlag).astype(np.int)
-        self.rlag_u = np.ceil(self.rlag).astype(np.int)
-        self.rlag_lf = 1.0 - (self.rlag - self.rlag_l.astype(np.float32))
-        self.rlag_uf = self.rlag - self.rlag_l.astype(np.float32)
-        self.rlag_l_unq = np.unique(self.rlag_l)
-        self.rlag_u_unq = np.unique(self.rlag_u)
-        self.roff_mask_l = {}
-        self.roff_mask_u = {}
-        for lag in self.rlag_l_unq:
-            lag = int(lag)
-            self.roff_mask_l[lag] = np.logical_and(self.mask == 1, self.rlag_l == lag)
-        for lag in self.rlag_u_unq:
-            lag = int(lag)
-            self.roff_mask_u[lag] = np.logical_and(self.mask == 1, self.rlag_u == lag)
+        max_lag = int(np.max(np.ceil(self.rlag).astype(np.int)))
+        self.nlags = max_lag + 1
+        self.rlag_3d = np.zeros((self.nlags, self.ny, self.nx), dtype=np.float32)
+        self.rlag_3d -= 999.0
+        for lag in range(self.nlags):
+            if lag < max_lag:
+                self.rlag_3d[lag,:,:] = np.where(
+                    (self.rlag >= np.float32(lag)) & (self.rlag < np.float32(lag+1.0)),
+                    1.0 - (self.rlag - np.floor(self.rlag)),
+                    self.rlag_3d[lag,:,:]
+                )
+                self.rlag_3d[lag+1,:,:] = np.where(
+                    (self.rlag >= np.float32(lag)) & (self.rlag < np.float32(lag+1.0)),
+                    self.rlag - np.floor(self.rlag),
+                    self.rlag_3d[lag+1,:,:]
+                )
+        self.rlag_3d = np.maximum(self.rlag_3d, 0.0)
+        self.rlag_3d[:,self.mask == 0] = 0.0
         
         # Storage and mass balance check helper variables
         self.ds = np.zeros((self.ny, self.nx), dtype=np.float32)
@@ -468,33 +464,15 @@ class BaseModel(object):
         for a time lag of 1.25 timesteps, 75% of the unrouted runoff is 
         assigned to lag=1 and 25% to lag=2.
         """
-        # Partitioning between bounding integer lags
-        roff_l = self.roff_nr * self.rlag_lf
-        roff_u = self.roff_nr * self.rlag_uf
-        
-        # Lower bound lag
-        for lag in self.rlag_l_unq:
+        roff_r = self.rlag_3d * self.roff_nr
+        for lag in range(self.nlags):
             lag = int(lag)
             roff_date = self.date + datetime.timedelta(seconds=(lag * self.dt))
-            
-            roff_pl = np.sum(roff_l[self.roff_mask_l[lag] == 1]) / self.cat_ncells
-            
+            roff_t = np.sum(roff_r[lag,:,:]) / self.cat_ncells
             if roff_date not in self.dc_roff.keys():
-                self.dc_roff[roff_date] = roff_pl
+                self.dc_roff[roff_date] = roff_t
             else:
-                self.dc_roff[roff_date] += roff_pl
-        
-        # Upper bound lag
-        for lag in self.rlag_u_unq:
-            lag = int(lag)
-            roff_date = self.date + datetime.timedelta(seconds=(lag * self.dt))
-            
-            roff_pu = np.sum(roff_u[self.roff_mask_u[lag] == 1]) / self.cat_ncells
-            
-            if roff_date not in self.dc_roff.keys():
-                self.dc_roff[roff_date] = roff_pu
-            else:
-                self.dc_roff[roff_date] += roff_pu
+                self.dc_roff[roff_date] += roff_t
     
     def check_mb(self, pr, aet, roff):
         """Check catchment mass balance.
