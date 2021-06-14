@@ -9,6 +9,7 @@ import datetime
 
 import numpy as np
 import pandas as pd
+from numba import jit
 
 import utils
 
@@ -25,6 +26,7 @@ class BaseModel(object):
         mask (ndarray): Array marking inside (1) and outside (0) catchment
         elev (ndarray): Cell elevations [m]
         flen (ndarray): Cell distances to (main) outlet [m]
+        cell_order (pd.DataFrane): Ordered cell (and downslope cell) indices
         cat_ncells (float): Number of cells in catchment
         sim_dates (list of datetime): Date/time at each timestep of simulation
         date (datetime): Date/time of current timestep
@@ -45,6 +47,10 @@ class BaseModel(object):
         k1 (float): Coefficient for lower zone outflow [-]
         tau (float): Travel speed (number of timesteps to travel 1 m) 
             [timestep m-1]
+        ssm (float): Minimum slope angle for snow redistribution [degrees]
+        ssc (float): Coefficient for exponent in snow holding depth function
+        ssa (float): Coefficient for slope in snow holding depth function
+        sshdm (float): Minimum holding depth
         
         lp (float): Soil moisture limit for aet=pet [mm]
         rlag (ndarray): Time lag [timestep(s)]
@@ -80,6 +86,13 @@ class BaseModel(object):
         s1 (ndarray): Storage at end of timestep
         ds (ndarray): Storage change for timestep [mm]
         
+        self.ss_acc = Ordered cell flow accumulations for avalanche calcs
+        self.ss_yi = Ordered cell y indices for avalanche calcs
+        self.ss_xi = Ordered cell x indices for avalanche calcs
+        self.ss_dsyi = Downstream cell y indices for avalanche calcs
+        self.ss_dsxi = Downstream cell x indices for avalanche calcs
+        self.ss_hd = Ordered cell holding depths for avalanche calcs [mm]
+        
         aet (ndarray): Actual evapotranspiration [mm timestep-1]
         melt (ndarray): Melt [mm timestep-1]
         sm_in (ndarray): Inflow to soil moisture storage [mm timestep-1]
@@ -112,6 +125,7 @@ class BaseModel(object):
             mask (ndarray): Array marking inside (1) and outside (0) catchment
             elev (ndarray): Cell elevations [m]
             flen (ndarray): Cell distances to (main) outlet [m]
+            cell_order (pd.DataFrame): Ordered cell (and downslope cell) indices
         """
         self.dt = kwargs['dt']
         self.start_date = kwargs['start_date']
@@ -122,6 +136,7 @@ class BaseModel(object):
         self.elev = kwargs['elev']
         self.mask = kwargs['mask']
         self.flen = kwargs['flen']
+        self.cell_order = kwargs['cell_order']
         
         self.cat_ncells = np.float32(np.sum(self.mask))
         
@@ -158,6 +173,10 @@ class BaseModel(object):
             k1 (float): Coefficient for lower zone outflow [-]
             tau (float): Travel speed (number of timesteps to travel 1 m) 
                 [timestep m-1]
+            ssm (float): Minimum slope angle for snow redistribution [degrees]
+            ssc (float): Coefficient for exponent in snow holding depth function
+            ssa (float): Coefficient for slope in snow holding depth function
+            sshdm (float): Minimum holding depth
         """
         # Basic parameters
         self.icf = kwargs['icf']
@@ -174,11 +193,20 @@ class BaseModel(object):
         self.alpha = kwargs['alpha']
         self.k1 = kwargs['k1']
         self.tau = kwargs['tau']
+        self.ssm = kwargs['ssm']
+        self.ssc = kwargs['ssc']
+        self.ssa = kwargs['ssa']
+        self.sshdm = kwargs['sshdm']
         
         # Derived parameters
         self.lp = self.fc * self.lpf
         self.rlag = (np.max(self.flen) - self.flen) * self.tau
         self.rlag[self.mask == 0] = 0.0
+        #! Modifying (input) cell_order dataframe here currently
+        self.cell_order['HD'] = (
+            self.ssc * np.exp(self.ssa * self.cell_order['SLOPE'])
+        )
+        self.cell_order.loc[self.cell_order['HD'] < self.sshdm, 'HD'] = self.sshdm
     
     def init_outputs(self, **kwargs):
         """Initialise variables controlling and recording simulation outputs.
@@ -267,6 +295,16 @@ class BaseModel(object):
         self.ds = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.s0 = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.s1 = np.zeros((self.ny, self.nx), dtype=np.float32)
+        
+        # For gravitational redistribution, subset on slopes above minimum
+        # threshold and convert to numpy arrays (for numba)
+        cell_order_sub = self.cell_order.loc[self.cell_order['SLOPE'] > self.ssm]
+        self.ss_acc = np.asarray(cell_order_sub['ACC'], dtype=np.int)
+        self.ss_yi = np.asarray(cell_order_sub['YI'], dtype=np.int)
+        self.ss_xi = np.asarray(cell_order_sub['XI'], dtype=np.int)
+        self.ss_dsyi = np.asarray(cell_order_sub['DS_YI'], dtype=np.int)
+        self.ss_dsxi = np.asarray(cell_order_sub['DS_XI'], dtype=np.int)
+        self.ss_hd = np.asarray(cell_order_sub['HD'], dtype=np.float32)
     
     def init_climate_obj(self):
         """Initialise user-defined climate input object (optional).
@@ -300,6 +338,10 @@ class BaseModel(object):
         self.sf_sc[:] = self.sf[:]
         
         self.update_params()
+        
+        #! More frequent avalanches?
+        if (self.date.hour == 0) and (self.date.day == 1):
+            self.simulate_avalanches()
         
         self.simulate_interception()
         self.simulate_evapotranspiration()
@@ -474,6 +516,16 @@ class BaseModel(object):
             else:
                 self.dc_roff[roff_date] += roff_t
     
+    def simulate_avalanches(self):
+        """Calculate gravitational snow redistribution based on SnowSlide method.
+        
+        Calls a function to permit faster calculation using numba package.
+        """
+        self.swe, self.snwl, self.snws = grav_redist(
+            self.ss_acc, self.ss_yi, self.ss_xi, self.ss_dsyi, self.ss_dsxi, 
+            self.swe, self.snwl, self.snws, self.ss_hd
+        )
+    
     def check_mb(self, pr, aet, roff):
         """Check catchment mass balance.
         
@@ -528,6 +580,28 @@ class BaseModel(object):
         idx = self.sim_dates.index(self.date)
         self.df_cat.iloc[idx] = out_vals
 
+@jit(nopython=True)
+def grav_redist(ss_acc, ss_yi, ss_xi, ss_dsyi, ss_dsxi, swe, snwl, snws, ss_hd):
+    """Calculate gravitational snow redistribution using SnowSlide method."""
+    for idx in range(ss_acc.shape[0]):
+        yi = ss_yi[idx]
+        xi = ss_xi[idx]
+        if swe[yi,xi] > 0.0:
+            ds_yi = ss_dsyi[idx]
+            ds_xi = ss_dsxi[idx]
+            liq_frac = snwl[yi,xi] / swe[yi,xi]
+            gr = swe[yi,xi] - ss_hd[idx]
+            gr_liq = gr * liq_frac
+            gr_sol = gr - gr_liq
+            if gr > 0.0:
+                snwl[yi,xi] -= gr_liq
+                snws[yi,xi] -= gr_sol
+                snwl[ds_yi,ds_xi] += gr_liq
+                snws[ds_yi,ds_xi] += gr_sol
+                swe[yi,xi] -= gr
+                swe[ds_yi,ds_xi] += gr
+    return(swe, snwl, snws)
+    
 
 
 

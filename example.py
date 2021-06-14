@@ -29,6 +29,10 @@ elev, nx, ny, xll, yll, dx, dy = utils.read_asc(elev_path)
 mask = utils.read_asc(mask_path, data_type=np.int, return_metadata=False)
 flen = utils.read_asc(flen_path, return_metadata=False)
 
+# For gravitational redistribution of snow
+cell_order_path = 'Z:/DP/Work/HBV/Tests/Astore_DS.csv'
+cell_order = pd.read_csv(cell_order_path)
+
 # -----------------------------------------------------------------------------
 # Set parameters (initial and/or fixed values)
 
@@ -51,6 +55,12 @@ k = 0.03
 alpha = 0.7
 k1 = 0.01
 tau = 1.0 / 86400.0
+
+# For gravitational redistribution of snow
+ssm = 25.0
+ssc = 20000.0
+ssa = -0.08
+sshdm = 5.0
 
 # =============================================================================
 # Example with climate inputs using a class
@@ -163,15 +173,16 @@ class Model(hbv.BaseModel):
 # - i.e. {'dt': dt, 'start_date': start_date, ...}
 setup_dict = dict_of(
     # Timestep, simulation period, grid details, fixed input arrays
-    dt, start_date, end_date, nx, ny, dx, mask, elev, flen,
+    dt, start_date, end_date, nx, ny, dx, mask, elev, flen, cell_order,
     # Parameters
-    icf, lpf, fc, ttm, cfmax, cfr, whc, beta, perc, cflux, k, alpha, k1, tau
+    icf, lpf, fc, ttm, cfmax, cfr, whc, beta, perc, cflux, k, alpha, k1, tau,
+    ssm, ssc, ssa, sshdm,
 )
 
 m = Model(**setup_dict)
 m.run_model()
 
-output_path = 'Z:/DP/Work/HBV/Tests/out_z.csv'
+output_path = 'Z:/DP/Work/HBV/Tests/out_y1.csv'
 m.df_cat.to_csv(output_path)
 
 # =============================================================================
