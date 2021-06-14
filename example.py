@@ -133,11 +133,10 @@ class Climate(object):
         self.rf = np.where(self.tas > self.tm, self.pr, 0.0)
         self.sf = self.pr - self.rf
         # Very crude approximation of PET for testing
-        ##self.pet = self.tas * 0.0 # !EDIT
         self.pet = np.where(
             ((self.tas - self.tm) >= -20.0) & ((self.tas - self.tm) < -2.0),
             (self.tas - self.tm) * 0.01 + 0.22,
-            0.0 # self.pet
+            0.0
         )
         self.pet = np.where(
             (self.tas - self.tm) >= -2.0,
