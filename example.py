@@ -1,4 +1,4 @@
-"""Configure and run model"""
+"""Configure and run model using Climate class defined in climate.py"""
 
 import os
 import sys
@@ -34,6 +34,39 @@ cell_order_path = 'Z:/DP/Work/HBV/Tests/Astore_DS.csv'
 cell_order = pd.read_csv(cell_order_path)
 
 # -----------------------------------------------------------------------------
+# Get variables needed for climate inputs
+
+# Read in station details as dataframe
+# - assumes headers are: Station, YI, XI, Elevation, Path
+stations_path = 'Z:/DP/Work/HBV/Tests/Astore_Stations.csv'
+station_details = pd.read_csv(stations_path)
+
+# Dictionary of elevation gradients by variable and by month
+# - pr units are as per CRHM [1/100m]
+# - tas units are [K/km]
+# - pet units initially assumed to follow pr
+# - sign convention:
+#       positive = increase with elevation
+#       negative = decrease with elevation
+elevation_gradients = {
+    'pr': {
+        1: 0.01, 2: 0.01, 3: 0.01, 4: 0.01, 5: 0.01, 6: 0.01,
+        7: 0.01, 8: 0.01, 9: 0.01, 10: 0.01, 11: 0.01, 12: 0.01
+    },
+    'tas': {
+        1: -0.0065, 2: -0.0065, 3: -0.0065, 4: -0.0065, 5: -0.0065, 6: -0.0065,
+        7: -0.0065, 8: -0.0065, 9: -0.0065, 10: -0.0065, 11: -0.0065, 12: -0.0065
+    },
+    'pet': {
+        1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0,
+        7: 0.0, 8: 0.0, 9: 0.0, 10: 0.0, 11: 0.0, 12: 0.0
+    }
+}
+
+# Exponent for inverse-distance weighting interpolation step
+idw_exp = 2.0
+
+# -----------------------------------------------------------------------------
 # Set parameters (initial and/or fixed values)
 
 # - These parameters could also be set as numpy arrays (i.e. to permit spatially
@@ -63,110 +96,6 @@ ssa = -0.08
 sshdm = 5.0
 
 # =============================================================================
-# Example with climate inputs using a class
-
-# -----------------------------------------------------------------------------
-# Set up climate inputs class
-
-# - Making a simple class allows us to (1) calculate relevant constants and read
-# any key files (e.g. in __init__()) and (2) define a method to calculate (or 
-# read) climate inputs at each timestep in calc_fields()
-# - A class keeps all the important data and functionality together and gives
-# a lot of flexibility
-# - Example of creating spatial fields from one station time series using
-# lapse rates etc (just for testing)
-# - Could also adapt to read from a file(s) of arrays for each timestep (e.g. a
-# netcdf file) or to take a simulated spatial field from elsewhere (e.g. the
-# random mixing code)
-
-climate_input_path = 'Z:/DP/Work/HBV/Tests/climate_inputs.csv'
-
-class Climate(object):
-    """Read and/or calculate climate inputs.
-    
-    Attributes:
-        orog_fac (ndarray): Precipitation multiplication factor [-]
-        tadj (ndarray): Elevation adjustment for temperature [K]
-        pr (ndarray): Precipitation [mm timestep-1]
-        rf (ndarray): Rainfall [mm timestep-1]
-        sf (ndarray): Snowfall [mm timestep-1]
-        tas (ndarray): Near-surface air temperature [K]
-        pet (ndarray): Potential evapotranspiration [mm timestep-1]
-    """
-    
-    def __init__(self, climate_input_path, ny, nx, elev):
-        """Read initial inputs and calculate helper constants/variables."""
-        # Station time series
-        self.df = pd.read_csv(
-            climate_input_path, index_col='datetime', dtype=np.float32, 
-            parse_dates=True, dayfirst=True
-        )
-        
-        # Precipitation (orographic) factor array
-        zmax = 5000.0
-        betasub = 0.35
-        ksub = 3.0
-        betasuper = 3.0
-        ksuper  = 5.0
-        rfac = 1.9
-        zbase = 2394.0
-        self.orog_fac = np.zeros((ny, nx), dtype=np.float32)
-        self.orog_fac[elev<=zmax] = betasub * ((elev[elev<=zmax] * (zbase**-1)) ** ksub)
-        self.orog_fac[elev>zmax] = betasuper * ((zmax * (elev[elev>zmax]**-1)) ** ksuper)
-        self.orog_fac *= rfac
-        
-        # Temperature elevation adjustment array
-        self.tadj = np.zeros((ny, nx), dtype=np.float32)
-        self.tadj[:] = (elev - zbase) * -0.0065
-        
-        # Melting/freezing threshold temperature
-        self.tm = 273.15
-    
-    def calc_fields(self, date):
-        """Calculate spatial fields of climate inputs for timestep.
-        
-        Args:
-            date (datetime): Date/time of required climate fields
-        """
-        self.tas = self.tadj + np.float32(self.df.loc[self.df.index == date, 'tas'].values[0])
-        self.pr = self.orog_fac * np.float32(self.df.loc[self.df.index == date, 'pr'].values[0])
-        self.rf = np.where(self.tas > self.tm, self.pr, 0.0)
-        self.sf = self.pr - self.rf
-        # Very crude approximation of PET for testing
-        self.pet = np.where(
-            ((self.tas - self.tm) >= -20.0) & ((self.tas - self.tm) < -2.0),
-            (self.tas - self.tm) * 0.01 + 0.22,
-            0.0
-        )
-        self.pet = np.where(
-            (self.tas - self.tm) >= -2.0,
-            (self.tas - self.tm) * 0.3 + 0.8,
-            self.pet
-        )
-
-# -----------------------------------------------------------------------------
-# Define model class
-
-# - This is a class that inherits from hbv.BaseModel, where a couple of methods
-# are overridden to allow us to pass climate inputs to the model at each
-# timestep (see Climate class above)
-# - If we define some conventions we might be able to skip this part in future,
-# but it is needed in the initial version of the code
-
-class Model(hbv.BaseModel):
-    
-    def init_climate_obj(self):
-        self.ci = Climate(climate_input_path, ny, nx, elev)
-    
-    def get_climate_inputs(self):
-        self.ci.calc_fields(self.date)
-        self.pr[:] = self.ci.pr[:]
-        self.rf[:] = self.ci.rf[:]
-        self.sf[:] = self.ci.sf[:]
-        self.tas[:] = self.ci.tas[:]
-        self.pet[:] = self.ci.pet[:]
-
-# -----------------------------------------------------------------------------
 # Set up and run model
 
 # Make a dictionary of required variables
@@ -174,15 +103,17 @@ class Model(hbv.BaseModel):
 setup_dict = dict_of(
     # Timestep, simulation period, grid details, fixed input arrays
     dt, start_date, end_date, nx, ny, dx, mask, elev, flen, cell_order,
+    # For climate setup
+    station_details, elevation_gradients, idw_exp,
     # Parameters
     icf, lpf, fc, ttm, cfmax, cfr, whc, beta, perc, cflux, k, alpha, k1, tau,
     ssm, ssc, ssa, sshdm,
 )
 
-m = Model(**setup_dict)
+m = hbv.BaseModel(**setup_dict)
 m.run_model()
 
-output_path = 'Z:/DP/Work/HBV/Tests/out_y1.csv'
+output_path = 'Z:/DP/Work/HBV/Tests/output.csv'
 m.df_cat.to_csv(output_path)
 
 # =============================================================================
