@@ -39,7 +39,7 @@ class Climate(object):
     
     def __init__(self, station_details, elevation_gradients, elev, mask, ny, nx, idw_exp):
         """
-        Keyword Args:
+        Args:
             station_details (pd.DataFrame) Dataframe of station metadata/file paths
             elevation_gradients (dict) Dictionary (of dictionaries) containing elevation gradients
             mask (ndarray): Array marking inside (1) and outside (0) catchment
