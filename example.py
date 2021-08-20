@@ -43,7 +43,7 @@ station_details = pd.read_csv(stations_path)
 
 # Dictionary of elevation gradients by variable and by month
 # - pr units are as per CRHM [1/100m]
-# - tas units are [K/km]
+# - tas units are [K/m]
 # - pet units initially assumed to follow pr
 # - sign convention:
 #       positive = increase with elevation
