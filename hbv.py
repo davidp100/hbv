@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from numba import jit
 
+import climate
 import utils
 
 class BaseModel(object):
@@ -306,13 +307,21 @@ class BaseModel(object):
         self.ss_dsxi = np.asarray(cell_order_sub['DS_XI'], dtype=np.int)
         self.ss_hd = np.asarray(cell_order_sub['HD'], dtype=np.float32)
     
-    def init_climate_obj(self):
-        """Initialise user-defined climate input object (optional).
+    def init_climate_obj(self, **kwargs):
+        """Initialise user-defined climate input class.
         
-        Optional to help pass climate input fields to model at each timestep in
-        conjunction with self.get_climate_inputs() method.
+        Purpose is to help pass climate input fields to model at each timestep in
+        conjunction with self.get_climate_inputs() method. Both could be overridden.
         """
-        pass
+        self.ci = climate.Climate(
+            kwargs['station_details'],
+            kwargs['elevation_gradients'],
+            kwargs['elev'],
+            kwargs['mask'],
+            kwargs['ny'],
+            kwargs['nx'],
+            kwargs['idw_exp']
+        )
     
     def set_storages(self):
         """Override initial storage values if needed."""
@@ -355,11 +364,15 @@ class BaseModel(object):
     def get_climate_inputs(self):
         """Get climate input arrays.
         
-        Required as user-defined method to populate self.pr, self.rf, self.sf,
-        self.tas, self.pet. May use object initialised in 
-        self.init_climate_obj() if required. 
+        Defaults to use Climate object initialised in self.init_climate_obj(), 
+        which could be overridden alongside this method. 
         """
-        pass
+        self.ci.calc_fields(self.date)
+        self.pr[:] = self.ci.pr[:]
+        self.rf[:] = self.ci.rf[:]
+        self.sf[:] = self.ci.sf[:]
+        self.tas[:] = self.ci.tas[:]
+        self.pet[:] = self.ci.pet[:]
     
     def update_params(self):
         """Update parameter values for timestep if needed."""
