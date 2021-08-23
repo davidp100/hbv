@@ -111,7 +111,7 @@ class BaseModel(object):
         self.set_storages()
         self.init_climate_arrays()
         self.init_helper_vars()
-        self.init_climate_obj()
+        self.init_climate_obj(**kwargs)
     
     def init_basic(self, **kwargs):
         """Initialise timestep, simulation period, grid and domain definitions.
