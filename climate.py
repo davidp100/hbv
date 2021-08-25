@@ -201,11 +201,11 @@ def elevation_adjustment(x, gradient, elevation, target_elevation, method):
     approach to precipitation adjustment.
     
     Args:
-        x (float or ndarray) Value to adjust
-        gradient (float) Gradient for adjustment
-        elevation (float or ndarray) Elevation associated with value
-        target_elevation (float or ndarray) Target elevation to adjust to
-        method (int) Flag to indicate form of function to use
+        x (float or ndarray): Value/array to adjust
+        gradient (float): Gradient for adjustment
+        elevation (float or ndarray): Elevation associated with value
+        target_elevation (float or ndarray): Target elevation to adjust to
+        method (int): Flag to indicate form of function to use
     """
     if method == 1:
         x_target = x + gradient * (target_elevation - elevation)
