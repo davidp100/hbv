@@ -228,8 +228,8 @@ class BaseModel(object):
                 out_vars.append('roff')
         else:
             out_vars = [
-                'pr', 'aet', 'melt', 'roff', 'swe', 'sm', 'uz', 'lz', 'incps', 
-                'sca', 'ds', 'mb'
+                'pr', 'aet', 'melt', 'roff_nr', 'roff', 'swe', 'sm', 'uz', 'lz', 
+                'incps', 'sca', 'ds', 'mb'
             ]
         self.out_vars = out_vars
         self.df_cat = pd.DataFrame(
