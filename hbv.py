@@ -73,6 +73,7 @@ class BaseModel(object):
         pr (ndarray): Precipitation [mm timestep-1]
         rf (ndarray): Rainfall [mm timestep-1]
         sf (ndarray): Snowfall [mm timestep-1]
+        sf_frac (ndarray): Snowfall as fraction of precipitation [-]
         tas (ndarray): Near-surface air temperature [K]
         pet (ndarray): Potential evapotranspiration [mm timestep-1]
         pr_sc (ndarray): Precipitation reaching surface (i.e. after 
@@ -263,6 +264,7 @@ class BaseModel(object):
         self.pr = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.rf = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.sf = np.zeros((self.ny, self.nx), dtype=np.float32)
+        self.sf_frac = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.tas = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.pet = np.zeros((self.ny, self.nx), dtype=np.float32)
         self.pr_sc = np.zeros((self.ny, self.nx), dtype=np.float32)
@@ -373,6 +375,10 @@ class BaseModel(object):
         self.sf[:] = self.ci.sf[:]
         self.tas[:] = self.ci.tas[:]
         self.pet[:] = self.ci.pet[:]
+        
+        # Derive snowfall as fraction of precipitation
+        self.sf_frac.fill(0.0)
+        self.sf_frac[self.pr > 0.0] = self.sf[self.pr > 0.0] / self.pr[self.pr > 0.0]
     
     def update_params(self):
         """Update parameter values for timestep if needed."""
@@ -385,13 +391,10 @@ class BaseModel(object):
         Use snowfall fraction to partition between snowfall and rainfall.
         """
         if np.max(self.pr) > 0.0:
-            sf_frac = self.sf / self.pr
-            sf_frac = np.minimum(sf_frac, 1.0)
-            sf_frac = np.maximum(sf_frac, 0.0)
             incp = np.minimum(self.pr, self.icf - self.incps)
             self.incps += incp
             self.pr_sc -= incp
-            self.sf_sc -= (incp * sf_frac)
+            self.sf_sc -= (incp * self.sf_frac)
             self.rf_sc = self.pr_sc - self.sf_sc
     
     def simulate_evapotranspiration(self):
