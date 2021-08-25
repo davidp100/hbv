@@ -150,7 +150,7 @@ class Climate(object):
                         method = 2
                     station_vals_ref[variable][station] = elevation_adjustment(
                         station_vals[variable][station],
-                        self.elevation_gradients[variable][date.month - 1], 
+                        self.elevation_gradients[variable][date.month], 
                         station_elev, self.ref_elev, method
                     )
         
@@ -166,15 +166,15 @@ class Climate(object):
         # Apply elevation gradients (i.e. adjust from reference elevation to
         # actual (DEM) elevations)
         self.pr = elevation_adjustment(
-            self.pr, self.elevation_gradients['pr'][date.month - 1], self.ref_elev, 
+            self.pr, self.elevation_gradients['pr'][date.month], self.ref_elev, 
             self.elev, method=2
         )
         self.tas = elevation_adjustment(
-            self.tas, self.elevation_gradients['tas'][date.month - 1], self.ref_elev,
+            self.tas, self.elevation_gradients['tas'][date.month], self.ref_elev,
             self.elev, method=1
         )
         self.pet = elevation_adjustment(
-            self.pet, self.elevation_gradients['pet'][date.month - 1], self.ref_elev, 
+            self.pet, self.elevation_gradients['pet'][date.month], self.ref_elev, 
             self.elev, method=2
         )
         
