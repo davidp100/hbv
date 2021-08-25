@@ -14,10 +14,10 @@ class Climate(object):
     for elevation. 
     
     Attributes:
-        station_details (pd.DataFrame) Dataframe of station metadata/file paths
-        elevation_gradients (dict of dicts) Elevation gradients by variable and month
-        mask (ndarray): Array marking inside (1) and outside (0) catchment
+        station_details (pd.DataFrame): Dataframe of station metadata/file paths
+        elevation_gradients (dict of dicts): Elevation gradients by variable and month
         elev (ndarray): Cell elevations [m]
+        mask (ndarray): Array marking inside (1) and outside (0) catchment
         ny (int): Number of grid cells in north-south direction
         nx (int): Number of grid cells in east-west direction
         idw_exp (float): Exponent for IDW weight calculations
@@ -28,22 +28,22 @@ class Climate(object):
         tas (ndarray): Near-surface air temperature [K]
         pet (ndarray): Potential evapotranspiration [mm timestep-1]
         
-        tm (float) Melting/freezing temperature [K]
+        tm (float): Melting/freezing temperature [K]
         
-        stations (list of str) List of station names/IDs
-        station_series (dict of pd.DataFrame) Station climate time series
-        station_variables (dict of lists) List of variables available at each station
-        station_weights (dict of ndarray) Weights arrays for IDW calculations
-        ref_elev (float) Reference elevation for interpolation
+        stations (list of str): List of station names/IDs
+        station_series (dict of pd.DataFrame): Station climate time series
+        station_variables (dict of lists): List of variables available at each station
+        station_weights (dict of ndarray): Weights arrays for IDW calculations
+        ref_elev (float): Reference elevation for interpolation
     """
     
     def __init__(self, station_details, elevation_gradients, elev, mask, ny, nx, idw_exp):
         """
         Args:
             station_details (pd.DataFrame) Dataframe of station metadata/file paths
-            elevation_gradients (dict) Dictionary (of dictionaries) containing elevation gradients
-            mask (ndarray): Array marking inside (1) and outside (0) catchment
+            elevation_gradients (dict): Dictionary (of dictionaries) containing elevation gradients
             elev (ndarray): Cell elevations [m]
+            mask (ndarray): Array marking inside (1) and outside (0) catchment
             ny (int): Number of grid cells in north-south direction
             nx (int): Number of grid cells in east-west direction
             idw_exp (float): Exponent for IDW weight calculations
