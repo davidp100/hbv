@@ -339,9 +339,15 @@ class BaseModel(object):
             self.simulate_timestep()
             self.date += datetime.timedelta(seconds=self.dt)
     
-    def simulate_timestep(self):
-        """Simulate one timestep."""
-        self.get_climate_inputs()
+    def simulate_timestep(self, pr=None, update_date=False):
+        """Simulate one timestep.
+        
+        Args:
+            pr (ndarray): Precipitation array if passed directly
+        """
+        if update_date:
+            self.date += datetime.timedelta(seconds=self.dt)
+        self.get_climate_inputs(pr)
         
         # Initialise sub-canopy precipitation (i.e. reaching surface after 
         # interception) - will be modified
@@ -370,7 +376,7 @@ class BaseModel(object):
         Defaults to use Climate object initialised in self.init_climate_obj(), 
         which could be overridden alongside this method. 
         """
-        self.ci.calc_fields(self.date)
+        self.ci.calc_fields(self.date, pr)
         self.pr[:] = self.ci.pr[:]
         self.rf[:] = self.ci.rf[:]
         self.sf[:] = self.ci.sf[:]

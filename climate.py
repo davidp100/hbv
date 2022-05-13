@@ -115,7 +115,7 @@ class Climate(object):
         
         Args:
             date (datetime): Date/time of required climate fields
-            pr (ndarray): Precipitation array passed directly
+            pr (ndarray): Precipitation array if passed directly
         """
         # Fill climate arrays with zeros
         self.pr.fill(0.0)
@@ -182,7 +182,7 @@ class Climate(object):
         )
 
         # If precipitation has been passed directly then set it
-        self.pr = pr
+        self.pr[:] = pr[:]
         
         # Set precipitation below a (low) threshold to zero
         # - could be made a function of timestep
