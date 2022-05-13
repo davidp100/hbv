@@ -109,12 +109,13 @@ class Climate(object):
         
         # Reference elevation (taken as catchment mean elevation)
         self.ref_elev = np.around(np.mean(elev[mask == 1]))
-    
-    def calc_fields(self, date):
+
+    def calc_fields(self, date, pr=None):
         """Calculate spatial fields of climate inputs for timestep.
         
         Args:
             date (datetime): Date/time of required climate fields
+            pr (ndarray): Precipitation array passed directly
         """
         # Fill climate arrays with zeros
         self.pr.fill(0.0)
@@ -156,8 +157,9 @@ class Climate(object):
         
         # Interpolate adjusted station values
         for station in self.stations:
-            if 'pr' in self.station_variables[station]:
-                self.pr += (self.station_weights[station] * station_vals_ref['pr'][station])
+            if pr is not None:
+                if 'pr' in self.station_variables[station]:
+                    self.pr += (self.station_weights[station] * station_vals_ref['pr'][station])
             if 'tas' in self.station_variables[station]:
                 self.tas += (self.station_weights[station] * station_vals_ref['tas'][station])
             if 'pet' in self.station_variables[station]:
@@ -165,10 +167,11 @@ class Climate(object):
         
         # Apply elevation gradients (i.e. adjust from reference elevation to
         # actual (DEM) elevations)
-        self.pr = elevation_adjustment(
-            self.pr, self.elevation_gradients['pr'][date.month], self.ref_elev, 
-            self.elev, method=2
-        )
+        if pr is not None:
+            self.pr = elevation_adjustment(
+                self.pr, self.elevation_gradients['pr'][date.month], self.ref_elev,
+                self.elev, method=2
+            )
         self.tas = elevation_adjustment(
             self.tas, self.elevation_gradients['tas'][date.month], self.ref_elev,
             self.elev, method=1
@@ -177,6 +180,9 @@ class Climate(object):
             self.pet, self.elevation_gradients['pet'][date.month], self.ref_elev, 
             self.elev, method=2
         )
+
+        # If precipitation has been passed directly then set it
+        self.pr = pr
         
         # Set precipitation below a (low) threshold to zero
         # - could be made a function of timestep

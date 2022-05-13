@@ -1,4 +1,5 @@
-"""Minimal spatially distributed HBV model.
+"""
+Minimal spatially distributed HBV model.
 
 This module contains a class for the basic HBV-96 model largely following the
 wflow_hbv python implementation.
