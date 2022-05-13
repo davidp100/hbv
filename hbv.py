@@ -383,7 +383,7 @@ class BaseModel(object):
         
         self.get_outputs()
     
-    def get_climate_inputs(self):
+    def get_climate_inputs(self, pr=None):
         """Get climate input arrays.
         
         Defaults to use Climate object initialised in self.init_climate_obj(), 

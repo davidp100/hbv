@@ -182,7 +182,8 @@ class Climate(object):
         )
 
         # If precipitation has been passed directly then set it
-        self.pr[:] = pr[:]
+        if pr is not None:
+            self.pr[:] = pr[:]
         
         # Set precipitation below a (low) threshold to zero
         # - could be made a function of timestep
