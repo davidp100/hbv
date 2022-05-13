@@ -109,8 +109,7 @@ class BaseModel(object):
         self.init_basic(**kwargs)
         self.init_params(**kwargs)
         self.init_outputs(**kwargs)
-        self.init_storages() #! Use kwargs and remove self.set_storages()?
-        self.set_storages()
+        self.init_storages()
         self.init_climate_arrays()
         self.init_helper_vars()
         self.init_climate_obj(**kwargs)
@@ -326,9 +325,23 @@ class BaseModel(object):
             kwargs['idw_exp']
         )
     
-    def set_storages(self):
-        """Override initial storage values if needed."""
-        pass
+    def set_storages(self, incps=None, snws=None, snwl=None, sm=None, uz=None,
+                     lz=None, swe=None):
+        """Specify storage values if needed (e.g. alternative initialisation."""
+        if incps is not None:
+            self.incps[:] = incps[:]
+        if snws is not None:
+            self.snws[:] = snws[:]
+        if snwl is not None:
+            self.snwl[:] = snwl[:]
+        if sm is not None:
+            self.sm[:] = sm[:]
+        if uz is not None:
+            self.uz[:] = uz[:]
+        if lz is not None:
+            self.lz[:] = lz[:]
+        if swe is not None:
+            self.swe[:] = swe[:]
     
     def run_model(self):
         """Simulate all timesteps."""
