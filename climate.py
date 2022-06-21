@@ -157,7 +157,7 @@ class Climate(object):
         
         # Interpolate adjusted station values
         for station in self.stations:
-            if pr is not None:
+            if pr is None:
                 if 'pr' in self.station_variables[station]:
                     self.pr += (self.station_weights[station] * station_vals_ref['pr'][station])
             if 'tas' in self.station_variables[station]:
@@ -167,7 +167,7 @@ class Climate(object):
         
         # Apply elevation gradients (i.e. adjust from reference elevation to
         # actual (DEM) elevations)
-        if pr is not None:
+        if pr is None:
             self.pr = elevation_adjustment(
                 self.pr, self.elevation_gradients['pr'][date.month], self.ref_elev,
                 self.elev, method=2
