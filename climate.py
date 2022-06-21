@@ -91,8 +91,10 @@ class Climate(object):
         self.station_weights = {}
         for index, row in self.station_details.iterrows():
             station = row['Station']
-            yi = row['YI']
-            xi = row['XI']
+            # yi = row['YI']
+            # xi = row['XI']
+            yi = self.ny - np.ceil((row['Northing'] - self.yll) / self.dx)
+            xi = self.nx - np.floor((row['Easting'] - self.xll) / self.dx)
             dist = distmat_v2(self.pr, (yi, xi))
             dist[dist == 0.0] = 0.0000001 # account for zero distance at station
             self.station_weights[station] = 1.0 / (dist ** self.idw_exp)
