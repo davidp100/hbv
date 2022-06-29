@@ -1,4 +1,5 @@
-"""Minimal spatially distributed HBV model.
+"""
+Minimal spatially distributed HBV model.
 
 This module contains a class for the basic HBV-96 model largely following the
 wflow_hbv python implementation.
@@ -108,8 +109,7 @@ class BaseModel(object):
         self.init_basic(**kwargs)
         self.init_params(**kwargs)
         self.init_outputs(**kwargs)
-        self.init_storages() #! Use kwargs and remove self.set_storages()?
-        self.set_storages()
+        self.init_storages()
         self.init_climate_arrays()
         self.init_helper_vars()
         self.init_climate_obj(**kwargs)
@@ -325,9 +325,23 @@ class BaseModel(object):
             kwargs['idw_exp']
         )
     
-    def set_storages(self):
-        """Override initial storage values if needed."""
-        pass
+    def set_storages(self, incps=None, snws=None, snwl=None, sm=None, uz=None,
+                     lz=None, swe=None):
+        """Specify storage values if needed (e.g. alternative initialisation."""
+        if incps is not None:
+            self.incps[:] = incps[:]
+        if snws is not None:
+            self.snws[:] = snws[:]
+        if snwl is not None:
+            self.snwl[:] = snwl[:]
+        if sm is not None:
+            self.sm[:] = sm[:]
+        if uz is not None:
+            self.uz[:] = uz[:]
+        if lz is not None:
+            self.lz[:] = lz[:]
+        if swe is not None:
+            self.swe[:] = swe[:]
     
     def run_model(self):
         """Simulate all timesteps."""
@@ -338,9 +352,15 @@ class BaseModel(object):
             self.simulate_timestep()
             self.date += datetime.timedelta(seconds=self.dt)
     
-    def simulate_timestep(self):
-        """Simulate one timestep."""
-        self.get_climate_inputs()
+    def simulate_timestep(self, pr=None, update_date=False):
+        """Simulate one timestep.
+        
+        Args:
+            pr (ndarray): Precipitation array if passed directly
+        """
+        if update_date:
+            self.date += datetime.timedelta(seconds=self.dt)
+        self.get_climate_inputs(pr)
         
         # Initialise sub-canopy precipitation (i.e. reaching surface after 
         # interception) - will be modified
@@ -363,13 +383,13 @@ class BaseModel(object):
         
         self.get_outputs()
     
-    def get_climate_inputs(self):
+    def get_climate_inputs(self, pr=None):
         """Get climate input arrays.
         
         Defaults to use Climate object initialised in self.init_climate_obj(), 
         which could be overridden alongside this method. 
         """
-        self.ci.calc_fields(self.date)
+        self.ci.calc_fields(self.date, pr)
         self.pr[:] = self.ci.pr[:]
         self.rf[:] = self.ci.rf[:]
         self.sf[:] = self.ci.sf[:]
